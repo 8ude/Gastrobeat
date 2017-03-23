@@ -1,8 +1,7 @@
-﻿using System.Collections;
-using System.Collections.Generic;
-using UnityEngine;
+﻿using UnityEngine;
 using Beat;
 using DG.Tweening;
+using System;
 
 public class foodParticle : MonoBehaviour {
 
@@ -19,7 +18,34 @@ public class foodParticle : MonoBehaviour {
 
 	public Segment mySegment;
 
-	Vector3 nextPosition;
+    public class SegmentPress<T>
+    {
+        private readonly T[] _SegmentPressArray = new T[(int)Segment.LargeIntestine+1];
+
+        public void Clear()
+        {
+            Array.Clear(_SegmentPressArray, 0, (int)Segment.LargeIntestine+1);
+        }
+
+        public T this[Segment i]
+        {
+            get
+            {
+                return _SegmentPressArray[(int)i];
+            }
+            set
+            {
+                _SegmentPressArray[(int)i] = value;
+            }
+        }
+    }
+
+    SegmentPress<bool> buttonsPressedThisFrame = new SegmentPress<bool>();
+    SegmentPress<bool> buttonsDoublePressedThisWindow = new SegmentPress<bool>();
+    SegmentPress<bool> buttonsPressedThisWindow = new SegmentPress<bool>();
+
+
+    Vector3 nextPosition;
 	
 	[SerializeField] int index = 0;
 	double nextTime;
@@ -36,6 +62,9 @@ public class foodParticle : MonoBehaviour {
 	float beatWindow;
 	[SerializeField] float windowEnd;
 	[SerializeField] float windowStart;
+    bool inWindow;
+    bool windowReset;
+
 
 	[SerializeField] AudioClip teethFailSFX;
 	[SerializeField] AudioClip esoFailSFX;
@@ -49,8 +78,6 @@ public class foodParticle : MonoBehaviour {
 
 	float teethGateTime;
 
-	float beatTriggerCoolDown;
-
 	//myAge is used for evaluating regurgitation collisions with other boluses (boli?)
 	public float myAge;
 
@@ -59,15 +86,14 @@ public class foodParticle : MonoBehaviour {
 
 
 
-
-
 	// Use this for initialization
 	void Start () {
 		gameManager = GameObject.FindGameObjectWithTag ("GameManager");
 
 		mySegment = Segment.PreTeeth;
-		beatWindow = Clock.instance.ThirtySecondLength ();
-		nextTime = Clock.instance.AtNextEighth ();
+		beatWindow = Clock.instance.ThirtySecondLength();
+		nextTime = Clock.instance.AtNextEighth();
+        windowEnd = (float) (nextTime + Clock.instance.SixteenthLength());
 
 		gameObject.transform.position = preTeethPoints [0].position;
 		nextPosition = preTeethPoints [0].position;
@@ -78,149 +104,189 @@ public class foodParticle : MonoBehaviour {
 		_smallIntestineSuccess = false;
 		_largeIntestineSuccess = false;
 		_atGate = false;
+        windowReset = true;
 		index = 0;
-
-		//need this to keep beat update from firing too much;
-		beatTriggerCoolDown = Clock.instance.SixteenthLength ();
 
 		bolusSize = 1;
 
 		myAge = 0f;
 	}
 	
-	// Update is called once per frame
+	// Fixed Update is called once per frame
 	void FixedUpdate () {
-
-		beatTriggerCoolDown += Time.fixedDeltaTime;
 		myAge += Time.fixedDeltaTime;
 
+        //first we clear out the array that stores our button presses
+        buttonsPressedThisFrame.Clear();
 
-		//evaluate this at the beginning of the frame - if we're at a gate and at the end of the window, then check to see if the player
-		//was successful.  if not, set the food particle back
-		if (_atGate && AudioSettings.dspTime >= windowEnd) {
+        //now we store any buttons that were pressed this frame.
+        if(Input.GetKeyDown(KeyCode.A))
+        {
+            if (buttonsPressedThisWindow[Segment.PreTeeth])
+            {
+                buttonsDoublePressedThisWindow[Segment.PreTeeth] = true;
+            }
+            buttonsPressedThisFrame[Segment.PreTeeth] = true;
+            buttonsPressedThisWindow[Segment.PreTeeth] = true;
 
-			//if we're at the end of this chain, check to see if player has input appropriate command during this beat
-			//if they have not, send them back 4 points
-			if (mySegment == Segment.PreTeeth && index >= preTeethPoints.Length && !_teethSuccess) {
-				//FAILED
+        }
+        else if (Input.GetKeyDown(KeyCode.S))
+        {
+            if (buttonsPressedThisWindow[Segment.Esophagus])
+            {
+                buttonsDoublePressedThisWindow[Segment.Esophagus] = true;
+            }
+            buttonsPressedThisFrame[Segment.Esophagus] = true;
+            buttonsPressedThisWindow[Segment.Esophagus] = true;
+        }
+        else if (Input.GetKeyDown(KeyCode.W))
+        {
+            if (buttonsPressedThisWindow[Segment.SmallIntestine])
+            {
+                buttonsDoublePressedThisWindow[Segment.SmallIntestine] = true;
+            }
+            buttonsPressedThisFrame[Segment.SmallIntestine] = true;
+            buttonsPressedThisWindow[Segment.SmallIntestine] = true;
+        }
+        else if (Input.GetKeyDown(KeyCode.D))
+        {
+            if (buttonsPressedThisWindow[Segment.LargeIntestine])
+            {
+                buttonsDoublePressedThisWindow[Segment.LargeIntestine] = true;
+            }
+            buttonsPressedThisFrame[Segment.LargeIntestine] = true;
+            buttonsPressedThisWindow[Segment.LargeIntestine] = true;
+        }
 
-				nextPosition = preTeethPoints [preTeethPoints.Length - 3].position;
-				index = preTeethPoints.Length - 3;
+        inWindow = AudioSettings.dspTime <= windowEnd ? true : false;
 
-				//TriggerSFX
+        if (inWindow)
+        {
+            windowReset = true;
+        }
 
-				FoodAudioManager.Instance.PlaySFX (teethFailSFX, 1.0f, Clock.instance.AtNextSixteenth());
-			} else if (mySegment == Segment.Esophagus && index >= esophagusPoints.Length && !_esophagusSuccess) {
-				//FAILED
+        if (mySegment == Segment.PreTeeth)
+        {
+            if (index >= preTeethPoints.Length - 1)
+            {
+                atGate("Teeth");
+            }
+            else
+                _atGate = false;
+            nextPosition = preTeethPoints[index % preTeethPoints.Length].position;
+        }
+        else if (mySegment == Segment.Esophagus)
+        {
+            if (index >= esophagusPoints.Length - 1)
+            {
+                atGate("Stomach");
+            }
+            else
+                _atGate = false;
+            nextPosition = esophagusPoints[index % esophagusPoints.Length].position;
+        }
+        else if (mySegment == Segment.SmallIntestine)
+        {
+            if (index >= smallIntestinePoints.Length - 1)
+            {
+                atGate("SmallIntestine");
+            }
+            else
+                _atGate = false;
+            nextPosition = smallIntestinePoints[index % smallIntestinePoints.Length].position;
+        }
+        else if (mySegment == Segment.LargeIntestine)
+        {
+            if (index >= largeIntestinePoints.Length - 1)
+            {
+                atGate("LargeIntestine");
+            }
+            else
+                nextPosition = largeIntestinePoints[index % largeIntestinePoints.Length].position;
+        }
 
-				nextPosition = esophagusPoints [esophagusPoints.Length - 4].position;
-				index = esophagusPoints.Length - 4;
+        //on every time interval, evaluate some stuff
+        if (!inWindow && windowReset)
+        { //no need to track a cooldown separately
 
-				//TriggerSFX
-				FoodAudioManager.Instance.PlaySFX (esoFailSFX, 1.0f, Clock.instance.AtNextSixteenth());
-			} else if (mySegment == Segment.SmallIntestine && index >= smallIntestinePoints.Length && !_smallIntestineSuccess) {
-				//FAILED
+            index++;
+            //if we're at the end of this chain, listen for input to set _[thisSegment]Success to true
 
-				nextPosition = smallIntestinePoints [smallIntestinePoints.Length - 4].position;
-				index = smallIntestinePoints.Length - 4;
+            //evaluate this at the beginning of the frame - if we're at a gate and at the end of the window, then check to see if the player
+            //was successful.  if not, set the food particle back
+            if (_atGate)
+            {
+                //if we're at the end of this chain, check to see if player has input appropriate command during this beat
+                //if they have not, send them back 4 points
+                if (mySegment == Segment.PreTeeth && index >= preTeethPoints.Length && !_teethSuccess)
+                {
+                    //FAILED
 
-				//TriggerSFX
-				FoodAudioManager.Instance.PlaySFX (smIntFailSFX, 1.0f, Clock.instance.AtNextSixteenth());
-			} else if (mySegment == Segment.LargeIntestine && index >= largeIntestinePoints.Length && !_largeIntestineSuccess) {
-				//FAILED
+                    nextPosition = preTeethPoints[preTeethPoints.Length - 3].position;
+                    index = preTeethPoints.Length - 3;
 
-				nextPosition = smallIntestinePoints [smallIntestinePoints.Length - 4].position;
-				index = largeIntestinePoints.Length - 4;
+                    //TriggerSFX
 
-				//TriggerSFX
-				FoodAudioManager.Instance.PlaySFX (lgIntFailSFX, 1.0f, Clock.instance.AtNextSixteenth());
-			}
+                    FoodAudioManager.Instance.PlaySFX(teethFailSFX, 1.0f, Clock.instance.AtNextSixteenth());
+                }
+                else if (mySegment == Segment.Esophagus && index >= esophagusPoints.Length && !_esophagusSuccess)
+                {
+                    //FAILED
 
-		}
+                    nextPosition = esophagusPoints[esophagusPoints.Length - 4].position;
+                    index = esophagusPoints.Length - 4;
 
-		//on every time interval, evaluate some stuff
-		if (AudioSettings.dspTime >= nextTime  && beatTriggerCoolDown > Clock.instance.EighthLength()) {
+                    //TriggerSFX
+                    FoodAudioManager.Instance.PlaySFX(esoFailSFX, 1.0f, Clock.instance.AtNextSixteenth());
+                }
+                else if (mySegment == Segment.SmallIntestine && index >= smallIntestinePoints.Length && !_smallIntestineSuccess)
+                {
+                    //FAILED
 
-			beatTriggerCoolDown = 0f;
-			
-			//update object position, then the index
+                    nextPosition = smallIntestinePoints[smallIntestinePoints.Length - 4].position;
+                    index = smallIntestinePoints.Length - 4;
 
-			gameObject.transform.DOMove(nextPosition, Clock.instance.SixteenthLength(), false);
+                    //TriggerSFX
+                    FoodAudioManager.Instance.PlaySFX(smIntFailSFX, 1.0f, Clock.instance.AtNextSixteenth());
+                }
+                else if (mySegment == Segment.LargeIntestine && index >= largeIntestinePoints.Length && !_largeIntestineSuccess)
+                {
+                    //FAILED
 
-			nextTime = Clock.instance.AtNextEighth ();
-			//Debug.Log (AudioSettings.dspTime);
-			//Debug.Log (Clock.instance.AtNextEighth ());
+                    nextPosition = smallIntestinePoints[smallIntestinePoints.Length - 4].position;
+                    index = largeIntestinePoints.Length - 4;
 
-			index++;
+                    //TriggerSFX
+                    FoodAudioManager.Instance.PlaySFX(lgIntFailSFX, 1.0f, Clock.instance.AtNextSixteenth());
+                }
 
-			//if this puts object at a gate, then set the windowEnd time for evaluation
-			if (mySegment == Segment.PreTeeth && index == preTeethPoints.Length - 1) {
-				windowStart = (float)nextTime - Clock.instance.SixteenthLength ();
-				windowEnd = (float)nextTime + Clock.instance.SixteenthLength ();
-			} else if (mySegment == Segment.Esophagus && index == esophagusPoints.Length - 1) {
-				windowStart = (float)nextTime - Clock.instance.SixteenthLength ();
-				windowEnd = (float)nextTime + Clock.instance.SixteenthLength ();
-			} else if (mySegment == Segment.SmallIntestine && index == smallIntestinePoints.Length - 1) {
-				windowStart = (float)nextTime - Clock.instance.SixteenthLength ();
-				windowEnd = (float)nextTime + Clock.instance.SixteenthLength (); 
-			} else if (mySegment == Segment.LargeIntestine && index == largeIntestinePoints.Length - 1) {
-				windowStart = (float)nextTime - Clock.instance.SixteenthLength ();
-				windowEnd = (float)nextTime + Clock.instance.SixteenthLength ();
-			}
+            }
+            //update object position, then the index
+            nextTime = Clock.instance.AtNextEighth();
+            gameObject.transform.DOMove(nextPosition, Clock.instance.SixteenthLength(), false);
 
-		}
+            windowStart = (float)nextTime - Clock.instance.SixteenthLength();
+            windowEnd = (float)nextTime + Clock.instance.SixteenthLength();
 
-
-
-
-
-
-
-
-		//if we're at the end of this chain, listen for input to set _[thisSegment]Success to true
-		if (mySegment == Segment.PreTeeth) {
-			if (index >= preTeethPoints.Length - 1) {
-				atGate ("Teeth");
-			} else
-				_atGate = false;
-				nextPosition = preTeethPoints [index % preTeethPoints.Length].position;
-		} else if (mySegment == Segment.Esophagus) {
-			if (index >= esophagusPoints.Length - 1) {
-				atGate ("Stomach");
-			} else
-				_atGate = false;
-			nextPosition = esophagusPoints[index % esophagusPoints.Length].position;
-		} else if (mySegment == Segment.SmallIntestine) {
-			if (index >= smallIntestinePoints.Length - 1) {
-				atGate ("SmallIntestine");
-			} else
-				_atGate = false;
-			nextPosition = smallIntestinePoints[index % smallIntestinePoints.Length].position;
-		} else if (mySegment == Segment.LargeIntestine) {
-			if (index >= largeIntestinePoints.Length - 1) {
-				atGate ("LargeIntestine");
-			} else
-				nextPosition = largeIntestinePoints[index % largeIntestinePoints.Length].position;
-		}
-	}
-
-
+            buttonsPressedThisWindow.Clear();
+            buttonsDoublePressedThisWindow.Clear();
+            windowReset = false;           
+        }
+    }
 	//this SHOULD check for player input during every frame that they're at the gate
 
 	void atGate (string gateName) {
 		_atGate = true;
 		gameManager.BroadcastMessage ("LightUpText", gateName);
-		if (gateName == "Teeth") {
-
-		
-			if (!_teethSuccess && Input.GetKeyDown (KeyCode.A) && AudioSettings.dspTime <= windowEnd) {
+        if (gateName == "Teeth") {
+			if (!_teethSuccess && buttonsPressedThisFrame[Segment.PreTeeth] && inWindow) {
 
 				//I think this means the player needs to mash on the button in order to digest the food;
 				if (bolusSize > 1) {
 					DecreaseBolusSize();
 			
 				} else {
-					_teethSuccess = true;
+			 		_teethSuccess = true;
 					FoodAudioManager.Instance.PlaySFX (successSFX, 1.0f, Clock.instance.AtNextSixteenth());
 
 					mySegment = Segment.Esophagus;
@@ -231,7 +297,7 @@ public class foodParticle : MonoBehaviour {
 
 			}
 		} else if (gateName == "Stomach") {
-			if (!_esophagusSuccess && Input.GetKeyDown (KeyCode.S) && AudioSettings.dspTime <= windowEnd) {
+			if (!_esophagusSuccess && buttonsPressedThisFrame[Segment.Esophagus] && inWindow) {
 				if (bolusSize > 1) {
 					DecreaseBolusSize ();
 
@@ -244,7 +310,7 @@ public class foodParticle : MonoBehaviour {
 				}
 			}
 		} else if (gateName == "SmallIntestine") {
-			if (!_smallIntestineSuccess && Input.GetKeyDown (KeyCode.W) && AudioSettings.dspTime <= windowEnd) {
+			if (!_smallIntestineSuccess && buttonsPressedThisFrame[Segment.SmallIntestine] && inWindow) {
 				if (bolusSize > 1) {
 					DecreaseBolusSize ();
 
@@ -258,7 +324,7 @@ public class foodParticle : MonoBehaviour {
 				}
 			}
 		} else if (gateName == "LargeIntestine") {
-			if (!_largeIntestineSuccess && Input.GetKeyDown (KeyCode.D) && AudioSettings.dspTime <= windowEnd) {
+			if (!_largeIntestineSuccess && buttonsPressedThisFrame[Segment.LargeIntestine] && inWindow) {
 				if (bolusSize > 1) {
 					DecreaseBolusSize ();
 
